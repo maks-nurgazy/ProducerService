@@ -3,6 +3,9 @@ package com.maksnurgazy.producerservice.services.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.maksnurgazy.producerservice.dto.DataDto;
 import com.maksnurgazy.producerservice.dto.DataWrapperDto;
+import com.maksnurgazy.producerservice.entities.FileInfo;
+import com.maksnurgazy.producerservice.enums.ProcessStatus;
+import com.maksnurgazy.producerservice.repositories.ProcessedFileInfoRepository;
 import com.maksnurgazy.producerservice.services.FileHandlerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -12,17 +15,22 @@ import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.SimpleDateFormat;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 public class FileHandlerServiceImpl implements FileHandlerService {
+    private static final String RECORDS_DIRECTORY = "./../ProcessingService/logs/records/";
+
     private final SimpleDateFormat dateFormat;
     private final ObjectMapper objectMapper;
+    private final ProcessedFileInfoRepository processedFileInfoRepository;
+
 
     @Override
     public DataWrapperDto saveToFile(DataDto dataDto) {
         String fileName = getFileName(dataDto);
-        String filePath = "./../logs/records/" + fileName;
+        String filePath = RECORDS_DIRECTORY + fileName;
         Path path = Path.of(filePath);
 
         try {
@@ -41,8 +49,25 @@ public class FileHandlerServiceImpl implements FileHandlerService {
             long fileLength = file.length();
             file.seek(fileLength);
             file.writeBytes(line + System.lineSeparator());
-
             file.close();
+
+            System.out.println(fileName);
+
+            FileInfo fileInfo = processedFileInfoRepository.findById(fileName)
+                    .map(existingFileInfo -> {
+                        existingFileInfo.setStatus(ProcessStatus.UPDATED);
+
+                        return existingFileInfo;
+                    })
+                    .orElse(FileInfo.builder()
+                            .id(fileName)
+                            .status(ProcessStatus.NEW)
+                            .fileName(fileName)
+                            .lastProcessedRecord(0)
+                            .lastFileNumber(0)
+                            .build());
+
+            writeToDatabase(fileInfo);
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -70,5 +95,9 @@ public class FileHandlerServiceImpl implements FileHandlerService {
             file.seek(0);
             file.writeBytes(recordCount + System.lineSeparator());
         }
+    }
+
+    private void writeToDatabase(FileInfo fileInfo) {
+        processedFileInfoRepository.save(fileInfo);
     }
 }
